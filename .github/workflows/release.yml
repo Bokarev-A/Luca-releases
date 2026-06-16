@@ -1,0 +1,79 @@
+# Luca — desktop release builder.
+#
+# Place this file in the PUBLIC releases repo (e.g. OWNER/luca-releases) at
+# .github/workflows/release.yml. It checks out the PRIVATE source repo, builds
+# Windows/macOS/Linux installers with Tauri, signs them, and publishes a PUBLIC
+# GitHub Release (with latest.json for the auto-updater).
+#
+# Replace OWNER/luca with your private code repo.
+#
+# Secrets to add in the PUBLIC releases repo (Settings → Secrets → Actions):
+#   SOURCE_TOKEN                         PAT with read access to the private code repo
+#   TAURI_SIGNING_PRIVATE_KEY            contents of src-tauri/.tauri/luca-updater.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   the key password ("" if none)
+#
+# Run via Actions → "release" → Run workflow (pick source ref + version).
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref/tag of the private source to build"
+        required: true
+        default: "main"
+      version:
+        description: "Release version, e.g. v0.1.0"
+        required: true
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: macos-latest, args: "--target universal-apple-darwin" }
+          - { platform: ubuntu-22.04, args: "" }
+          - { platform: windows-latest, args: "" }
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: Bokarev-A/Luca
+          ref: ${{ github.event.inputs.ref }}
+          token: ${{ secrets.SOURCE_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install Linux deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.event.inputs.version }}
+          releaseName: "Luca ${{ github.event.inputs.version }}"
+          releaseBody: "Автоматическая сборка Luca."
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}
