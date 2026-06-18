@@ -77,3 +77,68 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  # Android — builds a signed universal APK and attaches it to the same release.
+  # Needs the desktop job first so the GitHub Release already exists.
+  # Extra secrets: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS
+  android:
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: Bokarev-A/Luca
+          ref: ${{ github.event.inputs.ref }}
+          token: ${{ secrets.SOURCE_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform + build-tools + NDK
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;35.0.0" "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - run: npm ci
+
+      - name: Prepare release signing
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/luca-release.jks"
+          {
+            echo "password=$KS_PASS"
+            echo "keyAlias=$KS_ALIAS"
+            echo "storeFile=$RUNNER_TEMP/luca-release.jks"
+          } > src-tauri/gen/android/keystore.properties
+
+      - name: Build signed APK
+        run: npm run tauri -- android build --apk
+
+      - name: Upload APK to the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk/universal/release -name "*.apk" | head -1)
+          OUT="Luca_${{ github.event.inputs.version }}_universal.apk"
+          cp "$APK" "$OUT"
+          gh release upload "${{ github.event.inputs.version }}" "$OUT" --clobber --repo "${{ github.repository }}"
