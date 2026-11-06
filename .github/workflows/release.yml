@@ -82,6 +82,24 @@ jobs:
           includeUpdaterJson: true
           args: ${{ matrix.args }} --verbose
 
+      - name: Verify connector from packaged AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          LUKA_APPIMAGE=$(find "$GITHUB_WORKSPACE/src-tauri/target/release/bundle/appimage" -maxdepth 1 -name '*.AppImage' -print -quit)
+          test -n "$LUKA_APPIMAGE"
+          LUKA_CHECK_DIR=$(mktemp -d "$RUNNER_TEMP/luka-appimage-check.XXXXXX")
+          cd "$LUKA_CHECK_DIR"
+          "$LUKA_APPIMAGE" --appimage-extract > /dev/null
+          LUKA_ARCHIVE=$(find squashfs-root -type f -path '*/mcp/luka-mcp.gz' -print -quit)
+          test -n "$LUKA_ARCHIVE"
+          gzip -dc "$LUKA_ARCHIVE" > "$LUKA_CHECK_DIR/luka-mcp"
+          cmp "$LUKA_CHECK_DIR/luka-mcp" "$GITHUB_WORKSPACE/src-tauri/binaries/luka-mcp-x86_64-unknown-linux-gnu"
+          chmod 700 "$LUKA_CHECK_DIR/luka-mcp"
+          cd "$GITHUB_WORKSPACE"
+          npm run verify:mcp -- "$LUKA_CHECK_DIR/luka-mcp"
+
   # Android — builds a signed universal APK and attaches it to the same release.
   # Needs the desktop job first so the GitHub Release already exists.
   # Extra secrets: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS
