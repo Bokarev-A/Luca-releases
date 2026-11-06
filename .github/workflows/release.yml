@@ -30,9 +30,14 @@ on:
         description: "Resume an existing release: build Linux and Android only"
         type: boolean
         default: false
+      android_only:
+        description: "Resume an existing release: build Android only"
+        type: boolean
+        default: false
 
 jobs:
   build:
+    if: ${{ !inputs.android_only }}
     permissions:
       contents: write
     strategy:
@@ -105,6 +110,7 @@ jobs:
   # Extra secrets: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS
   android:
     needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || inputs.android_only) }}
     permissions:
       contents: write
     runs-on: ubuntu-22.04
@@ -132,6 +138,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
 
       - name: Install platform + build-tools + NDK
         run: |
